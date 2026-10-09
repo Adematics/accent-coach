@@ -318,6 +318,23 @@ def record(focus, score, accent, target="", missed=()):
         PROGRESS.write_text(json.dumps(p, indent=2))
 
 
+def why_not_count(a16, said, target=""):
+    """Reason to keep a try out of progress (silence, noise, a cut-off click), or None to count it."""
+    if len(a16) < 0.8 * 16000:
+        return "it was under a second long"
+    frames = a16[: len(a16) // 400 * 400].reshape(-1, 400)
+    if not len(frames) or np.percentile(np.sqrt((frames ** 2).mean(axis=1)), 95) < 0.01:
+        return "it was almost silent"
+    heard = {clean_word(w) for w in said.split()} - {""}
+    if not heard:
+        return "no words were heard"
+    if target and target.strip() != said.strip():
+        want = [clean_word(w) for w in target.split() if clean_word(w)]
+        if want and sum(w in heard for w in want) / len(want) < 0.5:
+            return "it didn't sound like the sentence"
+    return None
+
+
 def weak_words(accent, n=8):
     words = load_progress()["words"].get(accent, {})
     todo = [(w, e) for w, e in words.items() if not e["mastered"]]
@@ -442,11 +459,13 @@ async def attempt(audio: UploadFile = File(...), accent: str = Form(...), target
                        "recognised_text": said, "score": score,
                        "words": [{k: w[k] for k in ("word", "expected", "heard", "issues")} for w in words]})
     feedback = ask_json(system, user)
-    record(focus or "free speaking", score, accent, target, feedback.get("fixes") or [])
+    skip = why_not_count(a16, said, target)
+    if not skip:
+        record(focus or "free speaking", score, accent, target, feedback.get("fixes") or [])
     for w in words:
         w.pop("heard_list", None)
     import base64
-    return {"said": said, "target": target, "score": score, "words": words, "feedback": feedback,
+    return {"said": said, "target": target, "score": score, "words": words, "feedback": feedback, "not_counted": skip,
             "model_wav": base64.b64encode(nat["wav"]).decode(),
             "pitch_you": pitch_you, "pitch_model": nat["pitch"]}
 
@@ -475,8 +494,10 @@ async def roleplay(audio: UploadFile = File(...), accent: str = Form(...), histo
     r = client().chat.completions.create(model=MODEL, response_format={"type": "json_object"}, messages=msgs)
     out = json.loads(r.choices[0].message.content)
     tip = out.get("tip")
-    record("role-play", score, accent, said, [tip] if isinstance(tip, dict) else [])
-    return {"said": said, "score": score, "reply": out.get("reply", ""), "tip": out.get("tip")}
+    skip = why_not_count(a16, said)
+    if not skip:
+        record("role-play", score, accent, said, [tip] if isinstance(tip, dict) else [])
+    return {"said": said, "score": score, "reply": out.get("reply", ""), "tip": out.get("tip"), "not_counted": skip}
 
 
 if __name__ == "__main__":

@@ -139,7 +139,10 @@ Your browser opens **http://127.0.0.1:8765**. If it doesn't, open that address y
 
 1. Pick **British** or **American** at the top, and a **female** or **male** voice.
 2. Read the tip and the sentence. Press **▶ Listen** (or **▶ Slow**).
-3. **Hold the space bar** (or the big blue button), say the sentence, then **let go**.
+3. **Click the big blue button** (or tap the space bar), say the sentence, then **click it again** to stop.
+   You can also hold the button or the space bar while you speak and let go when you're done.
+   While it listens, the button turns red with a pulsing dot and a timer, and a **green bar moves with
+   your voice**. If the bar doesn't move, the microphone isn't hearing you.
 4. Wait a few seconds for your result. Read the fixes, press **▶ Native** to hear it again, and try once more.
 5. Press **Next drill →** for a new sentence.
 
