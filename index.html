@@ -343,14 +343,15 @@ async function send(blob) {
       state.history.push({ role:'user', content: j.said }, { role:'assistant', content: j.reply });
       addChat('them', j.reply);
       await speak(j.reply);
-      status('Your turn.');
+      status(j.not_counted ? `Your turn. (That line wasn't saved to your progress: ${j.not_counted}.)` : 'Your turn.');
     } else {
       if (state.mode === 'coach' && state.lesson) { f.append('target', state.lesson.sentence); f.append('focus', state.lesson.focus); }
       const j = await (await post('/api/attempt', f)).json();
       showResult(j);
       state.modelUrl = 'data:audio/wav;base64,' + j.model_wav;
       new Audio(state.modelUrl).play();
-      status(state.mode === 'coach' ? 'Try it again, or press "Next drill".' : 'Say something else.');
+      if (j.not_counted) status(`Not saved to your progress: ${j.not_counted}.`, true);
+      else status(state.mode === 'coach' ? 'Try it again, or press "Next drill".' : 'Say something else.');
     }
   } catch (e) { status(e.message, true); }
   $('talk').disabled = false; $('talk').classList.remove('busy'); label('Click or hold to speak'); loadProgress();
