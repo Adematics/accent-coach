@@ -50,6 +50,20 @@
   .player .vt { font-size:13px; color:var(--muted); margin-top:4px; }
   .player .others { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
   .player .others button { font-size:13px; }
+  .stats { display:flex; flex-wrap:wrap; gap:18px; }
+  .stats div b { display:block; font-size:24px; }
+  .stats div span { font-size:13px; color:var(--muted); }
+  .wrow { display:grid; grid-template-columns:1fr auto; gap:4px 10px; padding:10px 0; border-top:1px solid var(--line); }
+  .wrow .w { font-size:18px; font-weight:600; }
+  .wrow .meta { font-size:13px; color:var(--muted); }
+  .wrow .how { grid-column:1 / -1; font-size:14px; }
+  .wrow .acts { display:flex; gap:6px; align-items:start; }
+  .wrow .acts button { font-size:13px; padding:5px 10px; }
+  .dots i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:3px; background:var(--line); }
+  .dots i.on { background:var(--ok); }
+  .mastered { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .mastered span { color:var(--ok); border:1px solid var(--line); border-radius:999px; padding:2px 10px; font-size:14px; }
+  summary { cursor:pointer; color:var(--muted); margin-top:10px; }
   table { width:100%; border-collapse:collapse; font-size:14px; } td { padding:4px 0; border-top:1px solid var(--line); }
 </style>
 </head>
@@ -108,7 +122,18 @@
   </section>
 
   <section class="card">
-    <div class="label">Your weak spots</div>
+    <div class="label">Your progress</div>
+    <div class="stats" id="stats">No practice yet.</div>
+  </section>
+
+  <section class="card">
+    <div class="label">Words to work on</div>
+    <div id="wordList"></div>
+    <details id="masteredBox" class="hidden"><summary id="masteredSum"></summary><div id="mastered" class="mastered"></div></details>
+  </section>
+
+  <section class="card">
+    <div class="label">Sounds, weakest first</div>
     <table id="progress"></table>
   </section>
 </main>
@@ -124,6 +149,7 @@ for (const g of ['accent','gender','mode']) {
     if (g === 'mode') showMode();
     if (g === 'accent' && state.mode === 'coach') newLesson();
     if (g === 'accent' && state.mode === 'roleplay') resetRp();
+    if (g === 'accent') loadProgress();
   });
 }
 
@@ -313,9 +339,70 @@ function drawPitch(model, you) {
   line(you, css.getPropertyValue('--you').trim());
 }
 
+function practiseWord(word, e) {
+  state.lesson = { focus: 'word practice', sentence: word,
+                   tip: [e.how, e.say_it_like && `Say it like ${e.say_it_like}.`].filter(Boolean).join(' ') };
+  [...$('mode').children].forEach(x => x.classList.toggle('on', x.dataset.v === 'coach'));
+  state.mode = 'coach'; showMode();
+  $('focus').textContent = 'Practising one word';
+  $('tipText').textContent = state.lesson.tip;
+  $('sentence').textContent = word;
+  $('lessonLinks').replaceWith(Object.assign(wordLinks(word), { id: 'lessonLinks' }));
+  $('lessonPlayer').innerHTML = '';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  speak(word).catch(err => status(err.message, true));
+  status('Listen, then hold the button and say the word. Three right in a row and it moves to mastered.');
+}
+
+async function wordAction(word, action) {
+  await post('/api/word', { accent: state.accent, word, action }); loadProgress();
+}
+
+function renderWords(words) {
+  const list = Object.entries(words);
+  const todo = list.filter(([, e]) => !e.mastered).sort((a, b) => (b[1].misses - b[1].streak) - (a[1].misses - a[1].streak));
+  const done = list.filter(([, e]) => e.mastered).map(([w]) => w).sort();
+  $('wordList').innerHTML = todo.length ? '' : '<div class="meta">No problem words yet. Words the coach corrects will collect here.</div>';
+  for (const [w, e] of todo) {
+    const r = document.createElement('div'); r.className = 'wrow';
+    r.innerHTML = `<div><span class="w"></span> <span class="meta"></span><div class="dots"></div></div>
+      <div class="acts"><button class="btn p">▶ Practise</button><button class="btn m" title="I've got it">✓</button><button class="btn x" title="Remove">✕</button></div>
+      <div class="how"></div>`;
+    r.querySelector('.w').textContent = w;
+    r.querySelector('.meta').textContent = `missed ${e.misses} of ${e.tries} · last ${e.last || ''}`;
+    r.querySelector('.dots').innerHTML = [0, 1, 2].map(i => `<i class="${i < e.streak ? 'on' : ''}"></i>`).join('');
+    r.querySelector('.how').textContent = [e.problem, e.say_it_like && `Say it like ${e.say_it_like}.`].filter(Boolean).join(' ');
+    r.querySelector('.p').onclick = () => practiseWord(w, e);
+    r.querySelector('.m').onclick = () => wordAction(w, 'mastered');
+    r.querySelector('.x').onclick = () => wordAction(w, 'remove');
+    $('wordList').appendChild(r);
+  }
+  $('masteredBox').classList.toggle('hidden', !done.length);
+  $('masteredSum').textContent = `Mastered (${done.length})`;
+  $('mastered').innerHTML = '';
+  for (const w of done) { const sp = document.createElement('span'); sp.textContent = '✓ ' + w; $('mastered').appendChild(sp); }
+}
+
+function renderStats(p) {
+  const h = p.history || [], today = new Date().toISOString().slice(0, 10);
+  const since = new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10);
+  const avg = a => a.length ? Math.round(a.reduce((x, y) => x + y.score, 0) / a.length) + '%' : '–';
+  const t = h.filter(x => x.day === today), wk = h.filter(x => x.day >= since);
+  const days = new Set(h.map(x => x.day)); let streak = 0;
+  for (let d = new Date(); days.has(d.toISOString().slice(0, 10)); d = new Date(d - 864e5)) streak++;
+  const w = Object.values((p.words || {})[state.accent] || {});
+  const cells = [[t.length, 'tries today'], [avg(t), 'today'], [avg(wk), 'last 7 days'], [streak, 'day streak'],
+                 [w.filter(e => !e.mastered).length, 'words to fix'], [w.filter(e => e.mastered).length, 'mastered']];
+  $('stats').innerHTML = '';
+  for (const [v, l] of cells) { const d = document.createElement('div'); d.innerHTML = '<b></b><span></span>';
+    d.querySelector('b').textContent = v; d.querySelector('span').textContent = l; $('stats').appendChild(d); }
+}
+
 async function loadProgress() {
   try {
     const p = await (await fetch('/api/progress')).json();
+    renderStats(p);
+    renderWords((p.words || {})[state.accent] || {});
     const rows = Object.entries(p.sounds).sort((a, b) => a[1].avg - b[1].avg);
     $('progress').innerHTML = rows.length ? '' : '<tr><td>No practice yet.</td></tr>';
     for (const [k, v] of rows) { const tr = document.createElement('tr');

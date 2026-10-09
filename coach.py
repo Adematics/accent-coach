@@ -4,6 +4,7 @@ Open-source parts run locally: Kokoro (voice), wav2vec2 phoneme model (what you 
 espeak-ng via phonemizer (what you should have said), librosa (pitch).
 OpenAI writes the lessons, transcribes, and turns the comparison into advice.
 """
+import datetime
 import difflib
 import io
 import json
@@ -269,20 +270,58 @@ def _start_warm_up():
 
 # ---------- progress ----------
 
+MASTERED_AFTER = 3  # right this many times in a row
+
+
 def load_progress():
     try:
-        return json.loads(PROGRESS.read_text())
+        p = json.loads(PROGRESS.read_text())
     except Exception:
-        return {"sounds": {}, "sessions": 0}
+        p = {}
+    p.setdefault("sounds", {})
+    p.setdefault("sessions", 0)
+    p.setdefault("words", {"british": {}, "american": {}})  # accent -> word -> stats
+    p.setdefault("history", [])  # one entry per attempt: day, score, mode
+    return p
 
 
-def record(focus, score):
-    p = load_progress()
-    s = p["sounds"].setdefault(focus, {"tries": 0, "avg": 0})
-    s["avg"] = round((s["avg"] * s["tries"] + score) / (s["tries"] + 1), 1)
-    s["tries"] += 1
-    p["sessions"] += 1
-    PROGRESS.write_text(json.dumps(p, indent=2))
+def clean_word(w):
+    return w.strip(".,!?;:\"()“”‘’").lower().replace("’", "'")
+
+
+def record(focus, score, accent, target="", missed=()):
+    """Save one attempt: sound average, daily history and per-word results.
+
+    A word counts as missed only when the coach chose to fix it (the raw sound flags are too noisy);
+    a word already on the list counts as right when it was said and not fixed.
+    """
+    with _lock:
+        p = load_progress()
+        s = p["sounds"].setdefault(focus, {"tries": 0, "avg": 0})
+        s["avg"] = round((s["avg"] * s["tries"] + score) / (s["tries"] + 1), 1)
+        s["tries"] += 1
+        p["sessions"] += 1
+        today = datetime.date.today().isoformat()
+        p["history"].append({"day": today, "score": score, "mode": focus})
+        p["history"] = p["history"][-2000:]
+        words = p["words"].setdefault(accent, {})
+        missed = {clean_word(m["word"]): m for m in missed if m.get("word")}
+        for w, fix in missed.items():
+            e = words.setdefault(w, {"tries": 0, "misses": 0, "streak": 0, "mastered": False})
+            e.update(tries=e["tries"] + 1, misses=e["misses"] + 1, streak=0, mastered=False, last=today,
+                     problem=fix.get("problem", ""), how=fix.get("how", ""), say_it_like=fix.get("say_it_like", ""))
+        for w in {clean_word(x) for x in target.split()} - set(missed):
+            e = words.get(w)
+            if e:
+                e.update(tries=e["tries"] + 1, streak=e["streak"] + 1, last=today)
+                e["mastered"] = e["streak"] >= MASTERED_AFTER
+        PROGRESS.write_text(json.dumps(p, indent=2))
+
+
+def weak_words(accent, n=8):
+    words = load_progress()["words"].get(accent, {})
+    todo = [(w, e) for w, e in words.items() if not e["mastered"]]
+    return [w for w, _ in sorted(todo, key=lambda x: (-x[1]["misses"] + x[1]["streak"], x[0]))][:n]
 
 
 def ask_json(system, user):
@@ -338,15 +377,33 @@ def progress():
     return load_progress()
 
 
+@app.post("/api/word")
+def word_status(accent: str = Form(...), word: str = Form(...), action: str = Form(...)):
+    """Mark a word mastered by hand, or remove it from the list."""
+    with _lock:
+        p = load_progress()
+        words = p["words"].setdefault(accent, {})
+        w = clean_word(word)
+        if action == "remove":
+            words.pop(w, None)
+        elif action == "mastered" and w in words:
+            words[w]["mastered"] = True
+        PROGRESS.write_text(json.dumps(p, indent=2))
+    return {"ok": True}
+
+
 @app.post("/api/lesson")
 def lesson(accent: str = Form(...), focus: str = Form(""), gender: str = Form("female")):
     p = load_progress()["sounds"]
+    weak = weak_words(accent)
     system = ("You are a friendly accent coach. " + LEARNER + " Reply in JSON with keys: focus (one item from the "
               "list), tip (one or two short sentences: what to do with tongue/lips/rhythm, with an example word), "
               "sentence (8-14 everyday words, natural, packed with the focus sound; business or daily-life "
               "topics), words (2-4 key words from the sentence that carry the sound).")
     user = (f"Target accent: {ACCENTS[accent]['name']}.\nSounds list: {SOUNDS}\n"
             f"Learner's history (avg score per sound, lower = weaker): {json.dumps(p)}\n"
+            + (f"Words the learner keeps getting wrong: {weak}. Where it fits naturally, put one or two of "
+               "them in the sentence.\n" if weak else "")
             + (f"Use this focus: {focus}" if focus else
                "Pick the weakest sound, or one not tried yet. Avoid repeating the same sentence as before."))
     out = ask_json(system, user)
@@ -385,7 +442,7 @@ async def attempt(audio: UploadFile = File(...), accent: str = Form(...), target
                        "recognised_text": said, "score": score,
                        "words": [{k: w[k] for k in ("word", "expected", "heard", "issues")} for w in words]})
     feedback = ask_json(system, user)
-    record(focus or "free speaking", score)
+    record(focus or "free speaking", score, accent, target, feedback.get("fixes") or [])
     for w in words:
         w.pop("heard_list", None)
     import base64
@@ -417,7 +474,8 @@ async def roleplay(audio: UploadFile = File(...), accent: str = Form(...), histo
         {"role": "user", "content": json.dumps({"caller_said": said, "phoneme_issues": weak})}]
     r = client().chat.completions.create(model=MODEL, response_format={"type": "json_object"}, messages=msgs)
     out = json.loads(r.choices[0].message.content)
-    record("role-play", score)
+    tip = out.get("tip")
+    record("role-play", score, accent, said, [tip] if isinstance(tip, dict) else [])
     return {"said": said, "score": score, "reply": out.get("reply", ""), "tip": out.get("tip")}
 
 

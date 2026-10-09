@@ -17,7 +17,14 @@ where English uses a weak "uh", long/short vowel pairs (ship/sheep), the bird/wo
   - lesson videos on that sound, playing in the page.
 - **Free speaking** — say anything; it coaches you on your own sentence.
 - **Cold-call role-play** — a London or New York clinic receptionist answers you aloud and flags one word per turn.
-- **Weak spots** — your average per sound is kept in `progress.json` and drives the next drill.
+- **Progress** — tries and average score today and over the last 7 days, and your day streak.
+- **Words to work on** — every word the coach corrects is saved, per accent, with how to fix it.
+  Press **Practise** to drill that word alone; say it right **3 times in a row** and it moves to
+  *Mastered* (you can also tick it off or remove it). Your problem words are worked into new drill sentences.
+- **Sounds, weakest first** — your average per sound drives which sound the next drill picks.
+
+All of it is kept in `progress.json` on your laptop. A word only counts as missed when the coach
+chose to correct it, so the noisier raw sound flags do not fill the list.
 
 ## How it works
 
