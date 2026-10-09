@@ -27,7 +27,19 @@
   button.btn:hover { border-color:var(--accent); }
   #talk { width:100%; padding:22px; font-size:18px; border-radius:14px; border:0; cursor:pointer;
           background:var(--accent); color:#fff; user-select:none; touch-action:none; }
+  #talk { display:flex; align-items:center; justify-content:center; gap:10px; }
   #talk.rec { background:var(--bad); }
+  #talk .dot { width:12px; height:12px; border-radius:50%; background:#fff; display:none; }
+  #talk.rec .dot { display:inline-block; animation:pulse 1s ease-in-out infinite; }
+  #talk .timer { font-variant-numeric:tabular-nums; opacity:.85; display:none; }
+  #talk.rec .timer { display:inline; }
+  #talk .spin { width:16px; height:16px; border:2px solid #fff; border-right-color:transparent; border-radius:50%; display:none; animation:spin .8s linear infinite; }
+  #talk.busy .spin { display:inline-block; }
+  @keyframes pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.3; transform:scale(.7); } }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  #meter { height:8px; border-radius:999px; background:var(--line); overflow:hidden; margin-top:8px; visibility:hidden; }
+  #meter.on { visibility:visible; }
+  #meterFill { height:100%; width:0; background:var(--ok); transition:width 60ms linear; }
   #talk:disabled { opacity:.5; cursor:wait; }
   .hint { color:var(--muted); font-size:14px; text-align:center; margin-top:6px; }
   .words span { display:inline-block; padding:2px 6px; margin:2px; border-radius:6px; font-size:19px; }
@@ -103,7 +115,8 @@
     <button class="btn" id="resetRp">Start a new call</button>
   </section>
 
-  <button id="talk">Hold to speak</button>
+  <button id="talk"><span class="dot"></span><span class="spin"></span><span id="talkLabel">Hold to speak</span><span class="timer" id="timer">0:00</span></button>
+  <div id="meter" aria-hidden="true"><div id="meterFill"></div></div>
   <div class="hint" id="status">The first run downloads the voice and sound models (about 1.5 GB), so it's slow once.</div>
 
   <section id="result" class="card hidden">
@@ -241,20 +254,55 @@ $('slow').onclick = () => state.lesson && speak(state.lesson.sentence, 0.75).cat
 $('next').onclick = newLesson;
 
 // ---- recording ----
-let rec, chunks = [], stream, recording = false;
+let rec, chunks = [], stream, recording = false, pressed = false;
+let audioCtx, analyser, meterLoop, timerLoop, peak = 0;
+const label = t => $('talkLabel').textContent = t;
+
+function startMeter() {
+  audioCtx = audioCtx || new AudioContext();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  if (!analyser) { analyser = audioCtx.createAnalyser(); analyser.fftSize = 1024; audioCtx.createMediaStreamSource(stream).connect(analyser); }
+  const buf = new Float32Array(analyser.fftSize); peak = 0;
+  $('meter').classList.add('on');
+  const tick = () => {
+    analyser.getFloatTimeDomainData(buf);
+    let sum = 0; for (const v of buf) sum += v * v;
+    const level = Math.min(1, Math.sqrt(sum / buf.length) * 6);  // speech lands around 0.3-0.9
+    peak = Math.max(peak, level);
+    $('meterFill').style.width = (level * 100) + '%';
+    meterLoop = requestAnimationFrame(tick);
+  };
+  tick();
+  const t0 = Date.now();
+  $('timer').textContent = '0:00';
+  timerLoop = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); $('timer').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }, 250);
+}
+function stopMeter() {
+  cancelAnimationFrame(meterLoop); clearInterval(timerLoop);
+  $('meterFill').style.width = '0'; $('meter').classList.remove('on');
+}
+
 async function startRec() {
   if (recording || $('talk').disabled) return;
-  try { stream = stream || await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch { return status('Microphone blocked. Allow it in the browser address bar.', true); }
+  pressed = true;
+  if (!stream) {
+    label('Waiting for the microphone…');
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch { label('Hold to speak'); return status('Microphone blocked. Allow it in the browser address bar.', true); }
+    if (!pressed) { label('Hold to speak'); return status('Microphone ready. Now hold the button while you speak.'); }
+  }
   chunks = []; rec = new MediaRecorder(stream);
   rec.ondataavailable = e => chunks.push(e.data);
   rec.onstop = () => send(new Blob(chunks, { type: rec.mimeType }));
   rec.start(); recording = true;
-  $('talk').classList.add('rec'); $('talk').textContent = 'Listening… let go when done';
+  $('talk').classList.add('rec'); label('Listening… let go when done');
+  status('🎙 Recording. The green bar should move when you speak.');
+  startMeter();
 }
 function stopRec() {
-  if (!recording) return; recording = false; rec.stop();
-  $('talk').classList.remove('rec'); $('talk').textContent = 'Hold to speak';
+  pressed = false;
+  if (!recording) return; recording = false; rec.stop(); stopMeter();
+  $('talk').classList.remove('rec'); label('Hold to speak');
 }
 $('talk').addEventListener('pointerdown', startRec);
 window.addEventListener('pointerup', stopRec);
@@ -263,8 +311,10 @@ window.addEventListener('keyup', e => { if (e.code === 'Space') { e.preventDefau
 
 async function send(blob) {
   if (blob.size < 2000) return status('Too short. Hold the button while you speak.', true);
+  if (peak < 0.08) status('I could barely hear you. Checking anyway; next time speak up or move closer to the mic.', true);
+  else status('Checking your sounds…');
   state.youUrl = URL.createObjectURL(blob);
-  $('talk').disabled = true; status('Checking your sounds…');
+  $('talk').disabled = true; $('talk').classList.add('busy'); label('Checking…');
   const f = form({ accent: state.accent, gender: state.gender }); f.append('audio', blob, 'speech.webm');
   try {
     if (state.mode === 'roleplay') {
@@ -284,7 +334,7 @@ async function send(blob) {
       status(state.mode === 'coach' ? 'Try it again, or press "Next drill".' : 'Say something else.');
     }
   } catch (e) { status(e.message, true); }
-  $('talk').disabled = false; loadProgress();
+  $('talk').disabled = false; $('talk').classList.remove('busy'); label('Hold to speak'); loadProgress();
 }
 
 function addChat(who, text, tip) {
