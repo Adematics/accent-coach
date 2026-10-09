@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accent Coach</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1f; --muted:#6b6b70; --line:#e4e2dd; --accent:#2b59c3;
+          --ok:#1f8a4c; --bad:#c2410c; --you:#c2410c; --model:#2b59c3; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141416; --card:#1e1e22; --ink:#f2f2f3; --muted:#9a9aa2;
+          --line:#2e2e34; --accent:#7aa2ff; --ok:#4ade80; --bad:#fb923c; --you:#fb923c; --model:#7aa2ff; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px 80px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--card); }
+  .seg button { border:0; background:none; color:var(--ink); padding:8px 14px; cursor:pointer; font:inherit; }
+  .seg button.on { background:var(--accent); color:#fff; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:14px; }
+  .label { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:6px; }
+  .sentence { font-size:22px; line-height:1.4; margin:6px 0 12px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button.btn { border:1px solid var(--line); background:var(--card); color:var(--ink); border-radius:10px;
+               padding:9px 14px; cursor:pointer; font:inherit; }
+  button.btn:hover { border-color:var(--accent); }
+  #talk { width:100%; padding:22px; font-size:18px; border-radius:14px; border:0; cursor:pointer;
+          background:var(--accent); color:#fff; user-select:none; touch-action:none; }
+  #talk.rec { background:var(--bad); }
+  #talk:disabled { opacity:.5; cursor:wait; }
+  .hint { color:var(--muted); font-size:14px; text-align:center; margin-top:6px; }
+  .words span { display:inline-block; padding:2px 6px; margin:2px; border-radius:6px; font-size:19px; }
+  .words .ok { color:var(--ok); } .words .bad { color:var(--bad); background:color-mix(in srgb, var(--bad) 12%, transparent); }
+  .score { font-size:34px; font-weight:700; }
+  .fix { border-top:1px solid var(--line); padding:10px 0; }
+  .fix b { font-size:18px; } .say { color:var(--accent); font-weight:600; }
+  canvas { width:100%; height:140px; display:block; }
+  .legend { font-size:13px; color:var(--muted); } .legend i { display:inline-block; width:18px; height:3px; vertical-align:middle; margin:0 4px 0 10px; }
+  .chat .me { text-align:right; } .chat p { margin:6px 0; }
+  .chat .them { color:var(--accent); }
+  .tip { font-size:14px; color:var(--bad); margin:-2px 0 8px; }
+  .err { color:var(--bad); }
+  .hidden { display:none; }
+  .links { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 2px; font-size:14px; }
+  .links a { color:var(--accent); text-decoration:none; border:1px solid var(--line); border-radius:999px; padding:3px 10px; }
+  .links a:hover { border-color:var(--accent); }
+  .player { margin:10px 0 4px; }
+  .player iframe { width:100%; aspect-ratio:16/9; border:0; border-radius:10px; display:block; }
+  .player .vt { font-size:13px; color:var(--muted); margin-top:4px; }
+  .player .others { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+  .player .others button { font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; } td { padding:4px 0; border-top:1px solid var(--line); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Accent Coach</h1>
+  <p class="sub">Hold the button (or the space bar), speak, let go.</p>
+
+  <div class="bar">
+    <div class="seg" id="accent"><button data-v="british" class="on">British</button><button data-v="american">American</button></div>
+    <div class="seg" id="gender"><button data-v="female" class="on">Female voice</button><button data-v="male">Male voice</button></div>
+    <div class="seg" id="mode"><button data-v="coach" class="on">Coach me</button><button data-v="free">Free speaking</button><button data-v="roleplay">Cold-call role-play</button></div>
+  </div>
+
+  <section id="lessonCard" class="card">
+    <div class="label" id="focus">Loading your first drill…</div>
+    <div id="tipText"></div>
+    <div class="sentence" id="sentence"></div>
+    <div class="links" id="lessonLinks"></div>
+    <div class="player" id="lessonPlayer"></div>
+    <div class="row">
+      <button class="btn" id="play">▶ Listen</button>
+      <button class="btn" id="slow">▶ Slow</button>
+      <button class="btn" id="next">Next drill →</button>
+    </div>
+  </section>
+
+  <section id="freeCard" class="card hidden">
+    <div class="label">Free speaking</div>
+    <div>Say anything. I'll write down what I heard, say it back in the accent you picked, and show which sounds to fix.</div>
+  </section>
+
+  <section id="rpCard" class="card hidden">
+    <div class="label">Cold-call role-play</div>
+    <div>You're calling a clinic. Open the call and keep going; the receptionist answers aloud and flags one word at a time.</div>
+    <div class="chat" id="chat"></div>
+    <button class="btn" id="resetRp">Start a new call</button>
+  </section>
+
+  <button id="talk">Hold to speak</button>
+  <div class="hint" id="status">The first run downloads the voice and sound models (about 1.5 GB), so it's slow once.</div>
+
+  <section id="result" class="card hidden">
+    <div class="row" style="justify-content:space-between">
+      <div><div class="label">Sounds matched</div><div class="score" id="score"></div></div>
+      <div class="row"><button class="btn" id="playYou">▶ You</button><button class="btn" id="playModel">▶ Native</button></div>
+    </div>
+    <div class="label" style="margin-top:12px">I heard</div><div id="said"></div>
+    <div class="label" style="margin-top:12px">Word by word</div><div class="words" id="words"></div>
+    <p id="summary"></p>
+    <div id="fixes"></div>
+    <p id="nextStep"></p>
+    <div class="label" style="margin-top:12px">Intonation (up = higher voice)</div>
+    <canvas id="pitch" width="1400" height="280"></canvas>
+    <div class="legend"><i style="background:var(--model)"></i>Native <i style="background:var(--you)"></i>You</div>
+  </section>
+
+  <section class="card">
+    <div class="label">Your weak spots</div>
+    <table id="progress"></table>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const state = { accent:'british', gender:'female', mode:'coach', lesson:null, history:[], youUrl:null, modelUrl:null };
+
+for (const g of ['accent','gender','mode']) {
+  $(g).addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...$(g).children].forEach(x => x.classList.toggle('on', x === b));
+    state[g] = b.dataset.v;
+    if (g === 'mode') showMode();
+    if (g === 'accent' && state.mode === 'coach') newLesson();
+    if (g === 'accent' && state.mode === 'roleplay') resetRp();
+  });
+}
+
+function showMode() {
+  $('lessonCard').classList.toggle('hidden', state.mode !== 'coach');
+  $('freeCard').classList.toggle('hidden', state.mode !== 'free');
+  $('rpCard').classList.toggle('hidden', state.mode !== 'roleplay');
+  $('result').classList.add('hidden');
+}
+
+// ---- free videos (open in a new tab) ----
+const CHANNELS = {
+  british: ['BBC Learning English sounds of English', 'English with Lucy', 'Pronunciation with Emma'],
+  american: ["Rachel's English", "Accent's Way English"],
+};
+const yt = q => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q);
+const youglish = (w, acc) => `https://youglish.com/pronounce/${encodeURIComponent(w.toLowerCase())}/english/${acc === 'british' ? 'uk' : 'us'}`;
+function linkRow(items) {
+  const d = document.createElement('div'); d.className = 'links';
+  for (const [label, href] of items) {
+    const a = document.createElement('a'); a.href = href; a.target = '_blank'; a.rel = 'noopener'; a.textContent = label; d.appendChild(a);
+  }
+  return d;
+}
+// In-app player (needs YOUTUBE_API_KEY); falls back to the links above when it isn't set.
+async function showVideos(box, q) {
+  box.innerHTML = '';
+  let j; try { j = await (await fetch('/api/videos?q=' + encodeURIComponent(q))).json(); } catch { return; }
+  if (!j.videos || !j.videos.length) { if (j.enabled) box.textContent = 'No lesson video found.'; return; }
+  const frame = document.createElement('iframe'), title = document.createElement('div'), others = document.createElement('div');
+  frame.allow = 'encrypted-media; picture-in-picture'; frame.allowFullscreen = true; title.className = 'vt'; others.className = 'others';
+  const play = v => { frame.src = `https://www.youtube-nocookie.com/embed/${v.id}?rel=0`; title.textContent = `${v.title} · ${v.channel}`; };
+  j.videos.forEach((v, i) => { const b = document.createElement('button'); b.className = 'btn'; b.textContent = 'Video ' + (i + 1); b.onclick = () => play(v); others.appendChild(b); });
+  play(j.videos[0]);
+  box.append(frame, title, others);
+}
+
+function wordLinks(word) {
+  const w = word.replace(/[^A-Za-z'-]/g, ''), acc = state.accent, who = acc === 'british' ? 'UK' : 'US';
+  const q = `how to pronounce ${w} ${acc} English`;
+  const row = linkRow([
+    [`▶ Real ${who} speakers say “${w}”`, youglish(w, acc)],
+    ['▶ Lesson video on YouTube', yt(q)],
+  ]);
+  const box = document.createElement('div'); box.className = 'player';
+  const here = document.createElement('a'); here.href = '#'; here.textContent = '▶ Watch here';
+  here.onclick = e => { e.preventDefault(); here.remove(); showVideos(box, q); };
+  row.prepend(here);
+  const wrap = document.createElement('div'); wrap.append(row, box);
+  return wrap;
+}
+function soundLinks(focus) {
+  const sound = focus.replace(/\(.*?\)/g, '').trim();
+  return linkRow([
+    ['▶ Lesson videos on this sound', yt(`${sound} ${state.accent} English pronunciation lesson`)],
+    ...CHANNELS[state.accent].map(c => ['▶ ' + c.replace(' sounds of English', ''), yt(`${c} ${sound} pronunciation`)]),
+  ]);
+}
+
+function form(obj) { const f = new FormData(); for (const k in obj) f.append(k, obj[k]); return f; }
+async function post(url, obj) {
+  const r = await fetch(url, { method:'POST', body: obj instanceof FormData ? obj : form(obj) });
+  if (!r.ok) { let m = 'Something went wrong.'; try { const j = await r.json(); m = j.error || j.detail || m; } catch {} throw new Error(m); }
+  return r;
+}
+function status(t, err) { $('status').textContent = t; $('status').classList.toggle('err', !!err); }
+
+async function speak(text, speed = 1) {
+  const r = await post('/api/tts', { text, accent: state.accent, gender: state.gender, speed });
+  const url = URL.createObjectURL(await r.blob());
+  new Audio(url).play();
+  return url;
+}
+
+async function newLesson() {
+  $('focus').textContent = 'Picking your next drill…'; $('sentence').textContent = ''; $('tipText').textContent = ''; $('lessonLinks').innerHTML = ''; $('lessonPlayer').innerHTML = '';
+  try {
+    state.lesson = await (await post('/api/lesson', { accent: state.accent, gender: state.gender })).json();
+    $('focus').textContent = 'Today: ' + state.lesson.focus;
+    $('tipText').textContent = state.lesson.tip;
+    $('sentence').textContent = state.lesson.sentence;
+    $('lessonLinks').replaceWith(Object.assign(soundLinks(state.lesson.focus), { id: 'lessonLinks' }));
+    showVideos($('lessonPlayer'), `${state.lesson.focus.replace(/\(.*?\)/g, '').trim()} ${state.accent} English pronunciation lesson`);
+    status('Listen first, then hold the button and say it.');
+  } catch (e) { $('focus').textContent = 'Could not load a drill'; status(e.message, true); }
+}
+$('play').onclick = () => state.lesson && speak(state.lesson.sentence).catch(e => status(e.message, true));
+$('slow').onclick = () => state.lesson && speak(state.lesson.sentence, 0.75).catch(e => status(e.message, true));
+$('next').onclick = newLesson;
+
+// ---- recording ----
+let rec, chunks = [], stream, recording = false;
+async function startRec() {
+  if (recording || $('talk').disabled) return;
+  try { stream = stream || await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch { return status('Microphone blocked. Allow it in the browser address bar.', true); }
+  chunks = []; rec = new MediaRecorder(stream);
+  rec.ondataavailable = e => chunks.push(e.data);
+  rec.onstop = () => send(new Blob(chunks, { type: rec.mimeType }));
+  rec.start(); recording = true;
+  $('talk').classList.add('rec'); $('talk').textContent = 'Listening… let go when done';
+}
+function stopRec() {
+  if (!recording) return; recording = false; rec.stop();
+  $('talk').classList.remove('rec'); $('talk').textContent = 'Hold to speak';
+}
+$('talk').addEventListener('pointerdown', startRec);
+window.addEventListener('pointerup', stopRec);
+window.addEventListener('keydown', e => { if (e.code === 'Space' && !e.repeat && e.target.tagName !== 'BUTTON') { e.preventDefault(); startRec(); } });
+window.addEventListener('keyup', e => { if (e.code === 'Space') { e.preventDefault(); stopRec(); } });
+
+async function send(blob) {
+  if (blob.size < 2000) return status('Too short. Hold the button while you speak.', true);
+  state.youUrl = URL.createObjectURL(blob);
+  $('talk').disabled = true; status('Checking your sounds…');
+  const f = form({ accent: state.accent, gender: state.gender }); f.append('audio', blob, 'speech.webm');
+  try {
+    if (state.mode === 'roleplay') {
+      f.append('history', JSON.stringify(state.history));
+      const j = await (await post('/api/roleplay', f)).json();
+      addChat('me', j.said, j.tip);
+      state.history.push({ role:'user', content: j.said }, { role:'assistant', content: j.reply });
+      addChat('them', j.reply);
+      await speak(j.reply);
+      status('Your turn.');
+    } else {
+      if (state.mode === 'coach' && state.lesson) { f.append('target', state.lesson.sentence); f.append('focus', state.lesson.focus); }
+      const j = await (await post('/api/attempt', f)).json();
+      showResult(j);
+      state.modelUrl = 'data:audio/wav;base64,' + j.model_wav;
+      new Audio(state.modelUrl).play();
+      status(state.mode === 'coach' ? 'Try it again, or press "Next drill".' : 'Say something else.');
+    }
+  } catch (e) { status(e.message, true); }
+  $('talk').disabled = false; loadProgress();
+}
+
+function addChat(who, text, tip) {
+  const p = document.createElement('p'); p.className = who; p.textContent = (who === 'me' ? 'You: ' : 'Clinic: ') + text;
+  $('chat').appendChild(p);
+  if (tip && tip.word) { const t = document.createElement('div'); t.className = 'tip';
+    t.textContent = `Fix “${tip.word}”: ${tip.how} Say it like ${tip.say_it_like}.`; $('chat').appendChild(t);
+    $('chat').appendChild(wordLinks(tip.word)); }
+}
+function resetRp() { state.history = []; $('chat').innerHTML = ''; status('Hold the button and open the call, e.g. "Hi, is that the clinic?"'); }
+$('resetRp').onclick = resetRp;
+
+function showResult(j) {
+  $('result').classList.remove('hidden');
+  $('score').textContent = j.score + '%';
+  $('said').textContent = '“' + j.said + '”';
+  $('words').innerHTML = '';
+  for (const w of j.words) { const s = document.createElement('span'); s.className = w.ok ? 'ok' : 'bad'; s.textContent = w.word; $('words').appendChild(s); }
+  const fb = j.feedback || {};
+  $('summary').textContent = fb.summary || '';
+  $('fixes').innerHTML = '';
+  for (const f of fb.fixes || []) {
+    const d = document.createElement('div'); d.className = 'fix';
+    d.innerHTML = `<b></b> — <span class="p"></span><br><span class="h"></span><br>Say it like: <span class="say"></span>`;
+    d.querySelector('b').textContent = f.word; d.querySelector('.p').textContent = f.problem;
+    d.querySelector('.h').textContent = f.how; d.querySelector('.say').textContent = f.say_it_like;
+    d.appendChild(wordLinks(f.word));
+    $('fixes').appendChild(d);
+  }
+  $('nextStep').textContent = fb.next || '';
+  drawPitch(j.pitch_model, j.pitch_you);
+}
+$('playYou').onclick = () => state.youUrl && new Audio(state.youUrl).play();
+$('playModel').onclick = () => state.modelUrl && new Audio(state.modelUrl).play();
+
+function drawPitch(model, you) {
+  const c = $('pitch'), x = c.getContext('2d'), css = getComputedStyle(document.documentElement);
+  x.clearRect(0, 0, c.width, c.height);
+  const all = [...model, ...you].filter(v => v !== null);
+  if (!all.length) return;
+  const lo = Math.min(...all, -6), hi = Math.max(...all, 6);
+  const line = (vals, color) => {
+    x.strokeStyle = color; x.lineWidth = 5; x.beginPath(); let pen = false;
+    vals.forEach((v, i) => {
+      if (v === null) { pen = false; return; }
+      const px = i / (vals.length - 1) * c.width, py = c.height - (v - lo) / (hi - lo) * (c.height - 20) - 10;
+      pen ? x.lineTo(px, py) : x.moveTo(px, py); pen = true;
+    });
+    x.stroke();
+  };
+  line(model, css.getPropertyValue('--model').trim());
+  line(you, css.getPropertyValue('--you').trim());
+}
+
+async function loadProgress() {
+  try {
+    const p = await (await fetch('/api/progress')).json();
+    const rows = Object.entries(p.sounds).sort((a, b) => a[1].avg - b[1].avg);
+    $('progress').innerHTML = rows.length ? '' : '<tr><td>No practice yet.</td></tr>';
+    for (const [k, v] of rows) { const tr = document.createElement('tr');
+      tr.innerHTML = '<td></td><td style="text-align:right"></td>';
+      tr.children[0].textContent = k; tr.children[1].textContent = `${v.avg}% · ${v.tries} tries`; $('progress').appendChild(tr); }
+  } catch {}
+}
+
+newLesson(); loadProgress();
+</script>
+</body>
+</html>

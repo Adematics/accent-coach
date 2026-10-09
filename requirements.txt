@@ -1,0 +1,13 @@
+# Install torch first, CPU build: pip install torch --index-url https://download.pytorch.org/whl/cpu
+kokoro==0.9.4
+misaki[en]==0.9.4
+espeakng-loader==0.2.4
+phonemizer-fork==3.3.2
+transformers==5.19.0
+librosa==1.0.0
+soundfile==0.14.0
+fastapi==0.142.4
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+openai==3.26.1
+python-dotenv==1.2.4
